@@ -43,5 +43,20 @@ def get_movies():
     filtered = [m for m in movies if m["director"] == director]
     return jsonify(filtered)
 
+@app.route("/movies/<int:id>")
+def get_movie(id):
+    movie = next((m for m in movies if m["id"] == id), None)
+
+    if movie is None:
+        return jsonify({
+            "error": {
+                "message": "Movie not found",
+                "resource": "movie",
+                "id": id
+            }
+        }), 404
+
+    return jsonify(movie)
+
 if __name__ == '__main__':
     app.run(port=5000, debug=True)
