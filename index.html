@@ -3,30 +3,55 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>My First Page</title>
+<title>My Movies</title>
 <style>
-  body{margin:0;font:16px/1.6 system-ui,-apple-system,sans-serif;color:#1a1a1a;background:#f6f7fb}
-  main{max-width:640px;margin:0 auto;padding:40px 24px}
-  h1{margin:0 0 8px}
-  .tag{color:#6b7280}
-  hr{border:0;border-top:1px solid #e5e7eb;margin:24px 0}
-  ul{padding-left:20px}
-  a{color:#2563eb}
+  :root{--bg:#0f1220;--card:#1a1f35;--ink:#e7e9f3;--muted:#9aa3c7;--line:#2a3050;--ok:#3ddc97;--bad:#ff6b6b}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink)}
+  header{display:flex;align-items:center;gap:12px;padding:18px 24px;border-bottom:1px solid var(--line)}
+  h1{font-size:20px;margin:0;flex:1}
+  #status{font:13px ui-monospace,monospace;color:var(--muted);padding:4px 10px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}
+  #status b{color:var(--ok)} #status.err b{color:var(--bad)}
+  main{max-width:900px;margin:0 auto;padding:24px}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h3{margin:0 0 4px;font-size:16px}
+  .meta{color:var(--muted);font-size:14px}
+  .badge{display:inline-block;margin-top:10px;font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .badge.seen{color:var(--ok);border-color:var(--ok)}
 </style>
 </head>
 <body>
-  <main>
-    <h1>Hello from Flask</h1>
-    <p class="tag">This page is served by your own web server.</p>
-    <hr>
-    <h2>A few HTML elements</h2>
-    <p>This is a paragraph of text inside a static HTML page.</p>
-    <ul>
-      <li>An item in a list</li>
-      <li>Another item</li>
-      <li>One more item</li>
-    </ul>
-    <p>Here is a <a href="https://developer.mozilla.org/en-US/docs/Web/HTML">link about HTML</a>.</p>
-  </main>
+  <header><h1>🎬 My Movies</h1><span id="status">ready</span></header>
+  <main><div id="list" class="grid"></div></main>
+<script>
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+  const show = (m, p, status, ok) => { const s = $("#status"); s.className = ok ? "" : "err"; s.innerHTML = `${m} ${p} → <b>${status}</b>`; };
+
+  async function api(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: body ? {"Content-Type": "application/json"} : {},
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const data = await res.json().catch(() => null);
+    show(method, path, res.status, res.ok);
+    return { status: res.status, data };
+  }
+
+  const card = m => `<div class="card">
+    <h3>${esc(m.title)}</h3>
+    <div class="meta">${esc(m.director)} · ${m.year}</div>
+    <span class="badge ${m.watched ? "seen" : ""}">${m.watched ? "watched" : "unwatched"}</span>
+  </div>`;
+
+  async function load() {
+    const { data } = await api("GET", "/movies");
+    const movies = data || [];
+    $("#list").innerHTML = movies.length ? movies.map(card).join("") : '<p class="meta">No movies yet.</p>';
+  }
+  load();
+</script>
 </body>
 </html>
