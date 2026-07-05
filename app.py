@@ -10,7 +10,7 @@ movies = [
         "title": "Dazed and Confused",
         "director": "Richard Linklater",
         "year": 1993,
-        "watched": True
+        "watched": False
     },
     {
         "id": 1,
@@ -57,6 +57,40 @@ def get_movie(id):
         }), 404
 
     return jsonify(movie)
+
+@app.post("/movies")
+def create_movie():
+    print('POST /movies hit!')
+
+    if not request.is_json:
+        return jsonify({"error": "Not valid JSON"}), 400
+
+    data = request.get_json()
+    print("incoming:", data)
+
+    # 1) compute a new id based on current movies
+    if movies:
+        new_id = max(m["id"] for m in movies) + 1
+    else:
+        new_id = 0
+
+    # 2) build the movie dict the server will store
+    movie = {
+        "id": new_id,
+        "title": data["title"],
+        "director": data["director"],
+        "year": data["year"],
+        "watched": data["watched"],
+    }
+
+    # 3) mutate the in-memory list
+    movies.append(movie)
+    print("movies now:", movies)
+
+    # 4) return the created resource with 201
+    return jsonify(movie), 201
+
+
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)
