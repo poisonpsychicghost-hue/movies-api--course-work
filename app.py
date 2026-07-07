@@ -1,8 +1,15 @@
 from flask import Flask, send_file, jsonify, request
+from philosophers_api import register_philosophers_routes 
 
 app = Flask(__name__)
 
 print("App file Loaded")
+
+def error_response(error, message, status):
+    return jsonify({"error": error, "message": message}), status
+
+register_philosophers_routes(app, error_response)
+
 
 movies = [
     {
@@ -48,13 +55,8 @@ def get_movie(id):
     movie = next((m for m in movies if m["id"] == id), None)
 
     if movie is None:
-        return jsonify({
-            "error": {
-                "message": "Movie not found",
-                "resource": "movie",
-                "id": id
-            }
-        }), 404
+        return error_response("Not Found", f"Movie {id} Not Found", 404)
+            
 
     return jsonify(movie)
 
@@ -63,10 +65,35 @@ def create_movie():
     print('POST /movies hit!')
 
     if not request.is_json:
-        return jsonify({"error": "Not valid JSON"}), 400
+        return error_response("Bad Request", "Not valid JSON", 400)
 
     data = request.get_json()
     print("incoming:", data)
+
+    required_fields = ["title", "director", "year", "watched"]
+
+    for field in required_fields:
+        if field not in data:
+            return error_response(
+                "Bad Request",
+                f"Missing required field: {field}", 400)
+    for field in ["title", "director"]:
+        value = data.get(field)
+        if not isinstance(value, str) or value.strip() == "":
+            return error_response("Bad Request",
+                f"Field '{field}' must be a non-empty string",
+             400)
+                
+    if not isinstance(data.get("year"), int):
+        return error_response(
+            "Bad Request",
+            "Field 'year' must be an integer",
+            400)
+
+    if not isinstance(data.get("watched"), bool):
+        return error_response(
+            "Bad Request",
+            "Field 'watched' must be a boolean", 400)
 
     # 1) compute a new id based on current movies
     if movies:
@@ -90,7 +117,89 @@ def create_movie():
     # 4) return the created resource with 201
     return jsonify(movie), 201
 
+@app.put("/movies/<int:id>")
+def update_movie(id):
+    print(f"PUT /movies/{id} hit!")
 
+    # 1) find the existing movie
+    movie = next((m for m in movies if m["id"] == id), None)
+    if movie is None:
+        return error_response(
+            "Not Found",
+            f"Movie with id {id} not found.",
+            404
+        )
+
+    # 2) same JSON + validation rules as POST
+    if not request.is_json:
+        return error_response("Bad Request", "Not valid JSON", 400)
+
+    data = request.get_json()
+    print("incoming:", data)
+
+    required_fields = ["title", "director", "year", "watched"]
+
+    for field in required_fields:
+        if field not in data:
+            return error_response(
+                "Bad Request",
+                f"Missing required field: {field}",
+                400
+            )
+
+    for field in ["title", "director"]:
+        value = data.get(field)
+        if not isinstance(value, str) or value.strip() == "":
+            return error_response(
+                "Bad Request",
+                f"Field '{field}' must be a non-empty string",
+                400
+            )
+
+    if not isinstance(data.get("year"), int):
+        return error_response(
+            "Bad Request",
+            "Field 'year' must be an integer",
+            400
+        )
+
+    if not isinstance(data.get("watched"), bool):
+        return error_response(
+            "Bad Request",
+            "Field 'watched' must be a boolean",
+            400
+        )
+
+    # 3) mutate the existing movie (keep id)
+    movie["title"] = data["title"]
+    movie["director"] = data["director"]
+    movie["year"] = data["year"]
+    movie["watched"] = data["watched"]
+
+    print("movies now:", movies)
+
+    # 4) return the updated resource with 200
+    return jsonify(movie), 200
+
+@app.delete("/movies/<int:id>")
+def delete_movie(id):
+    print(f"DELETE /movies/{id} hit!")
+
+    # 1) find the movie
+    movie = next((m for m in movies if m["id"] == id), None)
+    if movie is None:
+        return error_response(
+            "Not Found",
+            f"Movie with id {id} not found.",
+            404
+        )
+
+    # 2) remove from list
+    movies.remove(movie)
+    print("movies now:", movies)
+
+    # 3) 204 No Content, empty body
+    return "", 204
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)
