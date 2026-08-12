@@ -1,11 +1,27 @@
-from flask import Flask, send_file, jsonify, request
+from flask import Flask, send_file, jsonify, request, g
 from philosophers_api import register_philosophers_routes 
 from flasgger import Swagger
+import sqlite3
 
 app = Flask(__name__)
 Swagger(app)
 
+DATABASE = "movies.db"
+
 print("App file Loaded")
+
+def get_db():
+    if "db" not in g:
+        conn = sqlite3.connect(DATABASE)
+        conn.row_factory = sqlite3.Row
+        g.db = conn
+    return g.db
+
+@app.teardown_appcontext
+def close_db(exception):
+    db = g.pop("db", None)
+    if db is not None:
+        db.close()
 
 def error_response(error, message, status):
     return jsonify({"error": error, "message": message}), status
@@ -53,6 +69,9 @@ def get_movies():
 
     """
     print('Movies Route Selected!')
+    db = get_db()
+    print("DB connection id:", id(db))
+
 
     director = request.args.get("director")
     
