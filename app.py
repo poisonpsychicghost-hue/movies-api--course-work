@@ -1,4 +1,4 @@
-from flask import Flask, send_file, jsonify, request, g
+from flask import Flask, send_file, jsonify, request, g, make_response
 from philosophers_api import register_philosophers_routes 
 from flasgger import Swagger
 import sqlite3
@@ -70,16 +70,10 @@ def get_movies():
     """
     print('Movies Route Selected!')
     db = get_db()
-    print("DB connection id:", id(db))
-
-
-    director = request.args.get("director")
-    
-    if director is None: 
-        return jsonify(movies)
-    
-    filtered = [m for m in movies if m["director"] == director]
-    return jsonify(filtered)
+    rows = db.execute("SELECT * FROM movies ORDER BY id"
+                    ).fetchall()
+    movies = [dict(row) for row in rows]
+    return jsonify(movies)
 
 @app.route("/movies/<int:id>")
 def get_movie(id):
@@ -90,13 +84,39 @@ def get_movie(id):
         200:
             description: Locates an indvidual Movie by ID
     """
-    movie = next((m for m in movies if m["id"] == id), None)
-
-    if movie is None:
+    db = get_db()
+    row = db.execute(
+                "SELECT * FROM movies WHERE id = ?",
+                (id,),
+            ).fetchone()
+    
+    
+    if row is None:
         return error_response("Not Found", f"Movie {id} Not Found", 404)
-            
+    return jsonify(dict(row))
 
-    return jsonify(movie)
+@app.get("/movies/<int:id>/full")
+def get_movie_full(id):
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT
+            movies.id,
+            movies.title,
+            movies.year,
+            movies.director_id,
+            directors.name AS director_name
+        FROM movies
+        JOIN directors ON movies.director_id = directors.id
+        WHERE movies.id = ?
+        """,
+        (id,),
+    ).fetchone()
+
+    if row is None:
+        return error_response("Not Found", f"Movie {id} Not Found.", 404)
+
+    return jsonify(dict(row))
 
 @app.post("/movies")
 def create_movie():
@@ -184,29 +204,123 @@ def create_movie():
             400
         )
 
-    # 1) compute a new id based on current movies
-    if movies:
-        new_id = max(m["id"] for m in movies) + 1
-    else:
-        new_id = 0
+    conn = get_db()
+    cursor = conn.cursor()
 
-    # 2) build the movie dict the server will store
+    cursor.execute(
+        "SELECT id FROM directors WHERE name = ?", (data["director"],)
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return error_response(
+            "Bad Request",
+            "Unknown director name; create the director first or use a valid director.",
+            400
+        )
+    director_id = row["id"]
+
+    cursor.execute(
+        """
+            INSERT INTO movies (title, year, director_id)
+            VALUES (?, ?, ?)
+        """, 
+        (data["title"], data["year"], director_id)
+    )
+    conn.commit()
+
+    new_id = cursor.lastrowid
+
     movie = {
         "id": new_id,
         "title": data["title"],
-        "director": data["director"],
         "year": data["year"],
+        "director": data["director"],
         "watched": data["watched"],
-        "actors": data["actors"],
+        "actors": data["actors"]
     }
 
-    # 3) mutate the in-memory list
-    movies.append(movie)
-    print("movies now:", movies)
+    response = make_response(jsonify(movie), 201)
+    response.headers["Location"] = f"/movies/{new_id}"
+    return response
 
-    # 4) return the created resource with 201
-    return jsonify(movie), 201
+@app.post("/directors")
+def create_director():
+    """
+    Creates a new director
+    ---
+    consumes:
+    - application/json
+    parameters:
+    - in: body
+        name: body
+        required: true
+        schema:
+            type: object
+            properties:
+                name:
+                    type: string
+            required: 
+                - name
+    responses:
+        201:
+            description: Director created successfully
+        400:
+            description: Invalid input data
+    
+    """
+    if not request.is_json:
+        return error_response("Bad Request", "Not Valid JSON", 400)
 
+    data = request.get_json()
+
+    if "name" not in data:
+        return error_response(
+            "Bad Request",
+            "Missing Required Field: name",
+            400
+        )
+
+    name = data.get("name")
+    if not isinstance(name, str) or name.strip() == "":
+        return(
+            "Bad Request",
+            "Field 'name' must be a non-empty string",
+            400
+        )
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT id FROM directors WHERE name = ?",
+        (name,)
+    )
+    existing = cursor.fetchone()
+    if existing is not None:
+        return error_response(
+            "Bad Request",
+            "Director with this name already exists",
+            400
+        )
+
+    cursor.execute(
+        "Insert Into directors (name) VALUES (?)",
+        (name,)
+    )
+
+    conn.commit()
+
+    new_id = cursor.lastrowid
+
+    director = {
+        "id": new_id,
+        "name": name,
+    }
+
+    response = make_response(jsonify(director), 201)
+    response.headers["Locations"] = f"/directors/{new_id}"
+    return response
+    
 @app.put("/movies/<int:id>")
 def update_movie(id):
     print(f"PUT /movies/{id} hit!")
@@ -385,4 +499,4 @@ def update_actors(id):
 
 
 if __name__ == '__main__':
-    app.run(port=5000, debug=True)
+    app.run(port=5000, debug=True,)
