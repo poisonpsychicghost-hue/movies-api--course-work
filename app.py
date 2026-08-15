@@ -95,6 +95,78 @@ def get_movie(id):
         return error_response("Not Found", f"Movie {id} Not Found", 404)
     return jsonify(dict(row))
 
+@app.route("/directors")
+def get_directors():
+    """
+        List all Directors
+        ---
+        responses:
+            200:
+                description: Returns a list of directors
+    
+        """
+    print('Directors Route Selected!')
+    db = get_db()
+    rows = db.execute("SELECT * FROM directors ORDER BY id"
+                        ).fetchall()
+    directors = [dict(row) for row in rows]
+    return jsonify(directors)
+
+@app.route("/directors/<int:id>")
+def get_director(id):
+    """
+        Locates and Displays a Director by ID
+        ---
+        response:
+            200:
+                description: Locates an indvidual Director by ID
+        """
+    db = get_db()
+    row = db.execute(
+                "SELECT * FROM directors WHERE id = ?",
+                (id,),
+            ).fetchone()
+        
+        
+    if row is None:
+        return error_response("Not Found", f"Director {id} Not Found", 404)
+    return jsonify(dict(row))
+
+@app.route("/directors/<int:id>/full")
+def get_director_full(id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT
+            d.name,
+            m.title,
+            m.year
+        FROM directors as d
+        INNER JOIN movies as m ON d.id = m.director_id
+        WHERE d.id = ?
+        ORDER BY m.year
+        
+        """,
+        (id,),
+    ).fetchall()
+    if not rows:
+        return error_response("Not Found", f"Director {id} Not Found.", 404)
+
+    director_name = rows[0]["name"]
+
+    movie_list = []
+    for row in rows:
+        movie_list.append({
+            "title": row["title"],
+            "year": row["year"]
+        })
+    
+    return jsonify({
+        "director": director_name,
+        "movies": movie_list
+    })
+
+
 @app.get("/movies/<int:id>/full")
 def get_movie_full(id):
     db = get_db()
@@ -203,30 +275,41 @@ def create_movie():
             "Each actor in 'actors' must be a string",
             400
         )
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
 
-    conn = get_db()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT id FROM directors WHERE name = ?", (data["director"],)
-    )
-    row = cursor.fetchone()
-    if row is None:
-        return error_response(
-            "Bad Request",
-            "Unknown director name; create the director first or use a valid director.",
-            400
+        cursor.execute(
+            "SELECT id FROM directors WHERE name = ?", (data["director"],)
         )
-    director_id = row["id"]
+        row = cursor.fetchone()
+        if row is None:
+            return error_response(
+                "Bad Request",
+                "Unknown director name; create the director first or use a valid director.",
+                400
+            )
+        director_id = row["id"]
 
-    cursor.execute(
-        """
-            INSERT INTO movies (title, year, director_id)
-            VALUES (?, ?, ?)
-        """, 
-        (data["title"], data["year"], director_id)
-    )
-    conn.commit()
+        cursor.execute(
+            """
+                INSERT INTO movies (title, year, director_id)
+                VALUES (?, ?, ?)
+            """, 
+            (data["title"], data["year"], director_id)
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        return error_response(
+            "Duplication Error",
+             "Movie with this title and year already exists.", 409)
+    except sqlite3.OperationalError as e:
+        msg = e.args[0] if e.args else ""
+        if "syntax error" in msg.lower():
+            return error_response("Invalid Request", "SQL-Related Issue", 400)
+        else: return error_response("Internal Error", "Unexpected database error", 500)
+    finally: 
+        conn.close() 
 
     new_id = cursor.lastrowid
 
@@ -405,98 +488,88 @@ def update_movie(id):
 @app.delete("/movies/<int:id>")
 def delete_movie(id):
     print(f"DELETE /movies/{id} hit!")
+    try:
+        db = get_db()
+        cursor = db.execute(
+            "DELETE FROM movies WHERE id = ?",
+            (id,),
+        )
+        db.commit()
+    except sqlite3.OperationalError as e:
+        msg = e.args[0] if e.args else ""
+        if "syntax error" in msg.lower():
+            return error_response(
+                "Bad Request",
+                "SQL-related syntax error in Request.",
+                400
+            )
+        else:
+            return error_response(
+                "Internal Error",
+                "Unexpected database error",
+                500
+            )
+    finally: 
+        db.close()
 
-    # 1) find the movie
-    movie = next((m for m in movies if m["id"] == id), None)
-    if movie is None:
+    if cursor.rowcount == 0:
         return error_response(
             "Not Found",
-            f"Movie with id {id} not found.",
+            f"Movie ID {id} Not Found.",
             404
         )
-
-    # 2) remove from list
-    movies.remove(movie)
-    print("movies now:", movies)
-
-    # 3) 204 No Content, empty body
-    return "", 204
-
-@app.patch("/movies/<int:id>/actors")
-def update_actors(id):
-    """
-    Update the actors list for a movie
-    ---
-    consumes:
-      - application/json
-    parameters:
-      - in: path
-        name: id
-        type: integer
-        required: true
-        description: ID of the movie to update
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          properties:
-            actors:
-              type: array
-              items:
-                type: string
-          required:
-            - actors
-    responses:
-      200:
-        description: Updated movie returned successfully
-      400:
-        description: Invalid input data (non-JSON, missing or invalid actors)
-      404:
-        description: Movie with given id not found
-    """
-
-    movie = next((m for m in movies if m["id"] == id), None)
-    if movie is None:
-        return error_response(
-            "Not Found",
-            f"Movie with id {id} not found.",
-            404
-        )
-
-    # 2) same JSON + validation rules as POST
+    else:
+        return "", 204
+    
+@app.patch("/movies/<int:id>")
+def update_movie_field(id):
     if not request.is_json:
         return error_response("Bad Request", "Not valid JSON", 400)
 
     data = request.get_json()
 
-    if "actors" not in data:
+    allowed_fields = ["title", "year", "director_id"] #left in for future refactor
+
+    fields = []
+    params = []
+
+    if "title" in data:
+        fields.append("title = ?")
+        params.append(data["title"])
+
+    if "year" in data:
+        fields.append("year = ?")
+        params.append(data["year"])
+
+    if "director_id" in data:
+        fields.append("director_id = ?")
+        params.append(data["director_id"])
+
+    if not fields:
         return error_response(
             "Bad Request",
-            "Missing required field: actors",
+            "No Update Fields Provided",
             400
         )
+    db = get_db()
 
-    actors = data.get("actors")
+    sql = "UPDATE movies SET " + ", ".join(fields) + " WHERE id = ?"
+    params.append(id)
 
-    if not isinstance(actors, list):
+    cursor = db.execute(sql, params)
+    db.commit()
+
+    if cursor.rowcount == 0:
         return error_response(
-            "Bad Request",
-            "Field 'actors' must be a list of strings",
-            400
+            "Not Found",
+            f"Movie with ID {id} Not Found",
+            404
         )
-
-    if not all(isinstance(item, str) for item in actors):
-        return error_response(
-            "Bad Request",
-            "Each actor in 'actors' must be a string",
-            400
-        )
-    
-    movie["actors"] = actors
-
-    return jsonify(movie), 200
-
+    row = db.execute(
+        "SELECT * FROM movies WHERE id = ?",
+        (id,)
+    ).fetchone()
+    return jsonify(dict(row)), 200
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True,)
