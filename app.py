@@ -135,36 +135,36 @@ def get_director(id):
 @app.route("/directors/<int:id>/full")
 def get_director_full(id):
     db = get_db()
-    rows = db.execute(
+    director_row = db.execute(
+        "SELECT id, name FROM directors WHERE id = ?",
+    (id,),
+    ).fetchone()
+
+    if director_row is None:
+        return error_response("Not Found", f"Director ID: {id} Not Found", 404)
+
+    movie_rows = db.execute(
         """
-        SELECT
-            d.name,
-            m.title,
-            m.year
-        FROM directors as d
-        INNER JOIN movies as m ON d.id = m.director_id
-        WHERE d.id = ?
-        ORDER BY m.year
-        
+            SELECT id, title, year FROM movies WHERE director_id = ? ORDER BY year
         """,
-        (id,),
-    ).fetchall()
-    if not rows:
-        return error_response("Not Found", f"Director {id} Not Found.", 404)
+        (id,),).fetchall()
 
-    director_name = rows[0]["name"]
+    if not movie_rows:
+        return error_response("Not Found", f"Director {id} Has No Movies in Database.", 200)
 
-    movie_list = []
-    for row in rows:
-        movie_list.append({
-            "title": row["title"],
-            "year": row["year"]
-        })
+    movies = [{
+        "id": row["id"],
+        "title": row["title"],
+        "year": row["year"],
+    } for row in movie_rows]
     
     return jsonify({
-        "director": director_name,
-        "movies": movie_list
-    })
+        "director": {
+            "id": director_row["id"],
+            "name": director_row["name"]
+        },
+        "movies": movies
+    }), 200
 
 
 @app.get("/movies/<int:id>/full")
@@ -308,8 +308,8 @@ def create_movie():
         if "syntax error" in msg.lower():
             return error_response("Invalid Request", "SQL-Related Issue", 400)
         else: return error_response("Internal Error", "Unexpected database error", 500)
-    finally: 
-        conn.close() 
+
+
 
     new_id = cursor.lastrowid
 
