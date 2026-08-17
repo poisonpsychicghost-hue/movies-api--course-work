@@ -13,21 +13,28 @@
   #status{font:13px ui-monospace,monospace;color:var(--muted);padding:4px 10px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}
   #status b{color:var(--ok)} #status.err b{color:var(--bad)}
   main{max-width:900px;margin:0 auto;padding:24px;display:grid;gap:18px}
-  input{font:inherit;background:#0c0f1c;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px 12px}
+  input,select{font:inherit;background:#0c0f1c;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px 12px}
   button{font:inherit;background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 14px;cursor:pointer}
   button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
-  form{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
-  form input[name=title],form input[name=director]{flex:1;min-width:140px}
-  form input[name=year]{width:100px}
-  .chk{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:14px}
-  .err-text{color:var(--bad);font-size:14px;margin:0;width:100%;min-height:1px}
-  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+  form{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .field{display:flex;flex-direction:column;gap:4px;min-width:150px}
+  .field.grow{flex:1}
+  .field label{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:5px}
+  .req{color:var(--bad)}
+  .tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--muted);color:var(--muted);font-size:11px;cursor:help;user-select:none}
+  .chk{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:14px;padding-bottom:9px}
+  .err-text{color:var(--bad);font-size:13px;margin:0;width:100%;min-height:1px}
+  .add-director{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
   .card h3{margin:0 0 4px;font-size:16px}
   .meta{color:var(--muted);font-size:14px}
-  .badge{display:inline-block;margin:10px 0;font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+  .badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
   .badge.seen{color:var(--ok);border-color:var(--ok)}
-  .card .row{display:flex;gap:8px}
+  .list-line{font-size:13px;color:var(--muted);margin:4px 0}
+  .list-line b{color:var(--ink);font-weight:500}
+  .card .row{display:flex;gap:8px;margin-top:10px}
   .card .row button{flex:1;background:transparent;color:var(--muted);border:1px solid var(--line);padding:6px}
   .card .row button.del{color:var(--bad)}
 </style>
@@ -35,23 +42,86 @@
 <body>
   <header><h1>🎬 My Movies</h1><span id="status">ready</span></header>
   <main>
+    <div class="add-director">
+      <div class="field">
+        <label for="newDirectorName">New director name</label>
+        <input id="newDirectorName" name="newDirectorName" placeholder="e.g. Greta Gerwig">
+      </div>
+      <button type="button" id="addDirectorBtn">Add director</button>
+      <p id="directorErr" class="err-text"></p>
+    </div>
+
     <form id="form" novalidate>
-      <input name="title" placeholder="Title">
-      <input name="director" placeholder="Director">
-      <input name="year" type="number" placeholder="Year">
+      <div class="field grow">
+        <label for="f-title">Title <span class="req">*</span></label>
+        <input id="f-title" name="title" placeholder="Title" required>
+      </div>
+
+      <div class="field grow">
+        <label for="f-director">
+          Director <span class="req">*</span>
+          <span class="tip" title="Must use a known director, or enter a new director with the box above.">?</span>
+        </label>
+        <select id="f-director" name="director" required>
+          <option value="" disabled selected>Select director…</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="f-year">Year <span class="req">*</span></label>
+        <input id="f-year" name="year" type="number" placeholder="Year" required>
+      </div>
+
+      <div class="field">
+        <label for="f-duration">Duration (min) <span class="req">*</span></label>
+        <input id="f-duration" name="duration_minutes" type="number" placeholder="Minutes" required>
+      </div>
+
+      <div class="field">
+        <label for="f-mpaa">MPAA rating</label>
+        <select id="f-mpaa" name="mpaa_rating">
+          <option value="">None</option>
+          <option value="G">G</option>
+          <option value="PG">PG</option>
+          <option value="PG-13">PG-13</option>
+          <option value="R">R</option>
+          <option value="NC-17">NC-17</option>
+          <option value="Not Rated">Not Rated</option>
+        </select>
+      </div>
+
+      <div class="field grow">
+        <label for="f-actors">
+          Actors <span class="req">*</span>
+          <span class="tip" title="Separate multiple entries with commas.">?</span>
+        </label>
+        <input id="f-actors" name="actors" placeholder="e.g. Tom Hanks, Meg Ryan" required>
+      </div>
+
+      <div class="field grow">
+        <label for="f-genres">
+          Genres <span class="req">*</span>
+          <span class="tip" title="Separate multiple entries with commas.">?</span>
+        </label>
+        <input id="f-genres" name="genres" placeholder="e.g. Comedy, Drama" required>
+      </div>
+
       <label class="chk"><input type="checkbox" name="watched"> watched</label>
+
       <button type="submit" id="submitBtn">Add movie</button>
       <button type="button" id="cancelBtn" class="ghost" hidden onclick="resetForm()">Cancel</button>
       <p id="formErr" class="err-text"></p>
     </form>
+
     <div id="list" class="grid"></div>
   </main>
 <script>
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const show = (m, p, status, ok) => { const s = $("#status"); s.className = ok ? "" : "err"; s.innerHTML = `${m} ${p} → <b>${status}</b>`; };
+  const splitList = v => v.split(",").map(s => s.trim()).filter(Boolean);
 
-  let MOVIES = [], editing = null;
+  let MOVIES = [], DIRECTORS = [], editing = null;
 
   async function api(method, path, body) {
     const res = await fetch(path, {
@@ -66,8 +136,13 @@
 
   const card = m => `<div class="card">
     <h3>${esc(m.title)}</h3>
-    <div class="meta">${esc(m.director)} · ${m.year}</div>
-    <span class="badge ${m.watched ? "seen" : ""}">${m.watched ? "watched" : "unwatched"}</span>
+    <div class="meta">${esc(m.director)} · ${m.year} · ${m.duration_minutes} min</div>
+    <div class="badges">
+      <span class="badge ${m.watched ? "seen" : ""}">${m.watched ? "watched" : "unwatched"}</span>
+      ${m.mpaa_rating ? `<span class="badge">${esc(m.mpaa_rating)}</span>` : ""}
+    </div>
+    <p class="list-line"><b>Actors:</b> ${m.actors && m.actors.length ? esc(m.actors.join(", ")) : "—"}</p>
+    <p class="list-line"><b>Genres:</b> ${m.genres && m.genres.length ? esc(m.genres.join(", ")) : "—"}</p>
     <div class="row">
       <button onclick="startEdit(${m.id})">Edit</button>
       <button class="del" onclick="del(${m.id})">Delete</button>
@@ -80,6 +155,35 @@
     $("#list").innerHTML = MOVIES.length ? MOVIES.map(card).join("") : '<p class="meta">No movies yet.</p>';
   }
 
+  async function loadDirectors() {
+    const { data } = await api("GET", "/directors");
+    DIRECTORS = data || [];
+    const sel = $("#f-director");
+    const current = sel.value; // preserve whatever the user has selected — no auto-select on refresh
+    sel.innerHTML = '<option value="" disabled>Select director…</option>'
+      + DIRECTORS.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join("");
+    if (current && DIRECTORS.some(d => d.name === current)) {
+      sel.value = current;
+    } else {
+      sel.value = "";
+    }
+  }
+
+  $("#addDirectorBtn").addEventListener("click", async () => {
+    const input = $("#newDirectorName");
+    const name = input.value.trim();
+    $("#directorErr").textContent = "";
+    if (!name) { $("#directorErr").textContent = "Enter a director name first."; return; }
+
+    const { status, data } = await api("POST", "/directors", { name });
+    if (status === 201) {
+      input.value = "";
+      await loadDirectors(); // intentionally does not select the new director
+    } else {
+      $("#directorErr").textContent = data?.message || data?.error || "Could not add director.";
+    }
+  });
+
   async function del(id) {
     const { status } = await api("DELETE", `/movies/${id}`);
     if (status === 204 || status === 200) { if (editing === id) resetForm(); load(); }
@@ -89,7 +193,14 @@
     const m = MOVIES.find(x => x.id === id);
     if (!m) return;
     const f = $("#form");
-    f.title.value = m.title; f.director.value = m.director; f.year.value = m.year; f.watched.checked = m.watched;
+    f.title.value = m.title;
+    f.director.value = m.director;
+    f.year.value = m.year;
+    f.duration_minutes.value = m.duration_minutes;
+    f.mpaa_rating.value = m.mpaa_rating || "";
+    f.actors.value = (m.actors || []).join(", ");
+    f.genres.value = (m.genres || []).join(", ");
+    f.watched.checked = !!m.watched;
     editing = id;
     $("#submitBtn").textContent = "Save changes";
     $("#cancelBtn").hidden = false;
@@ -98,6 +209,7 @@
 
   function resetForm() {
     $("#form").reset();
+    $("#f-director").value = "";
     editing = null;
     $("#submitBtn").textContent = "Add movie";
     $("#cancelBtn").hidden = true;
@@ -108,14 +220,27 @@
     e.preventDefault();
     const f = e.target;
     $("#formErr").textContent = "";
-    const body = { title: f.title.value, director: f.director.value, year: Number(f.year.value), watched: f.watched.checked };
+
+    const body = {
+      title: f.title.value.trim(),
+      director: f.director.value,
+      year: Number(f.year.value),
+      duration_minutes: Number(f.duration_minutes.value),
+      watched: f.watched.checked,
+      actors: splitList(f.actors.value),
+      genres: splitList(f.genres.value),
+    };
+    const mpaa = f.mpaa_rating.value;
+    if (mpaa) body.mpaa_rating = mpaa;
+
     const method = editing ? "PUT" : "POST";
     const path = editing ? `/movies/${editing}` : "/movies";
     const { status, data } = await api(method, path, body);
-    if (status === 400) { $("#formErr").textContent = data?.message || data?.error || "Invalid input."; return; }
+    if (status === 400 || status === 409) { $("#formErr").textContent = data?.message || data?.error || "Invalid input."; return; }
     if (status === 200 || status === 201) { resetForm(); load(); }
   });
 
+  loadDirectors();
   load();
 </script>
 </body>

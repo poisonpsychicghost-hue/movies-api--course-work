@@ -1,7 +1,8 @@
 from flask import Flask, send_file, jsonify, request, g, make_response
-from philosophers_api import register_philosophers_routes 
+from philosophers_api import register_philosophers_routes
 from flasgger import Swagger
 import sqlite3
+import json
 
 app = Flask(__name__)
 Swagger(app)
@@ -28,27 +29,6 @@ def error_response(error, message, status):
 
 register_philosophers_routes(app, error_response)
 
-
-movies = [
-    {
-        "id": 0,
-        "title": "Dazed and Confused",
-        "director": "Richard Linklater",
-        "year": 1993,
-        "watched": False,
-        "actors": ["Matthew McConaughey"]
-    },
-    {
-        "id": 1,
-        "title": "Spirited Away",
-        "director": "Hayao Miyazaki",
-        "year": 2001,
-        "watched": True,
-        "actors": ["Rumi Hiiragi"]
-    }
-]
-print("Movies at Startup", movies)
-
 @app.route("/")
 def home():
     return send_file("index.html")
@@ -57,6 +37,11 @@ def home():
 def about():
     print("The /about route was requested")
     return "<h1>This API will manage movie data.</h1>"
+
+
+# ---------------------------------------------------------------------------
+# GET routes
+# ---------------------------------------------------------------------------
 
 @app.route("/movies")
 def get_movies():
@@ -70,9 +55,16 @@ def get_movies():
     """
     print('Movies Route Selected!')
     db = get_db()
-    rows = db.execute("SELECT * FROM movies ORDER BY id"
-                    ).fetchall()
-    movies = [dict(row) for row in rows]
+    rows = db.execute("SELECT * FROM movies ORDER BY id").fetchall()
+
+    movies = []
+    for row in rows:
+        movie = dict(row)
+        movie["actors"] = json.loads(movie["actors"]) if movie["actors"] else []
+        movie["genres"] = json.loads(movie["genres"]) if movie["genres"] else []
+        movie["watched"] = bool(movie["watched"]) if movie["watched"] is not None else None
+        movies.append(movie)
+
     return jsonify(movies)
 
 @app.route("/movies/<int:id>")
@@ -89,11 +81,16 @@ def get_movie(id):
                 "SELECT * FROM movies WHERE id = ?",
                 (id,),
             ).fetchone()
-    
-    
+
     if row is None:
         return error_response("Not Found", f"Movie {id} Not Found", 404)
-    return jsonify(dict(row))
+
+    movie = dict(row)
+    movie["actors"] = json.loads(movie["actors"]) if movie["actors"] else []
+    movie["genres"] = json.loads(movie["genres"]) if movie["genres"] else []
+    movie["watched"] = bool(movie["watched"]) if movie["watched"] is not None else None
+
+    return jsonify(movie)
 
 @app.route("/directors")
 def get_directors():
@@ -103,7 +100,7 @@ def get_directors():
         responses:
             200:
                 description: Returns a list of directors
-    
+
         """
     print('Directors Route Selected!')
     db = get_db()
@@ -126,8 +123,8 @@ def get_director(id):
                 "SELECT * FROM directors WHERE id = ?",
                 (id,),
             ).fetchone()
-        
-        
+
+
     if row is None:
         return error_response("Not Found", f"Director {id} Not Found", 404)
     return jsonify(dict(row))
@@ -157,7 +154,7 @@ def get_director_full(id):
         "title": row["title"],
         "year": row["year"],
     } for row in movie_rows]
-    
+
     return jsonify({
         "director": {
             "id": director_row["id"],
@@ -169,6 +166,15 @@ def get_director_full(id):
 
 @app.get("/movies/<int:id>/full")
 def get_movie_full(id):
+    """
+    Locates and displays a movie by ID with full detail, including director name.
+    ---
+    responses:
+        200:
+            description: Returns the full movie record
+        404:
+            description: Movie not found
+    """
     db = get_db()
     row = db.execute(
         """
@@ -177,7 +183,12 @@ def get_movie_full(id):
             movies.title,
             movies.year,
             movies.director_id,
-            directors.name AS director_name
+            directors.name AS director_name,
+            movies.mpaa_rating,
+            movies.duration_minutes,
+            movies.watched,
+            movies.actors,
+            movies.genres
         FROM movies
         JOIN directors ON movies.director_id = directors.id
         WHERE movies.id = ?
@@ -188,7 +199,17 @@ def get_movie_full(id):
     if row is None:
         return error_response("Not Found", f"Movie {id} Not Found.", 404)
 
-    return jsonify(dict(row))
+    movie = dict(row)
+    movie["actors"] = json.loads(movie["actors"]) if movie["actors"] else []
+    movie["genres"] = json.loads(movie["genres"]) if movie["genres"] else []
+    movie["watched"] = bool(movie["watched"]) if movie["watched"] is not None else None
+
+    return jsonify(movie)
+
+
+# ---------------------------------------------------------------------------
+# POST routes
+# ---------------------------------------------------------------------------
 
 @app.post("/movies")
 def create_movie():
@@ -208,11 +229,19 @@ def create_movie():
               type: string
             year:
               type: integer
-            director: 
+            director:
                 type: string
+            mpaa_rating:
+                type: string
+            duration_minutes:
+                type: integer
             watched:
                 type: boolean
             actors:
+                type: array
+                items:
+                    type: string
+            genres:
                 type: array
                 items:
                     type: string
@@ -220,8 +249,10 @@ def create_movie():
             - title
             - year
             - director
+            - duration_minutes
             - watched
             - actors
+            - genres
     responses:
       201:
         description: Movie created successfully
@@ -236,45 +267,78 @@ def create_movie():
     data = request.get_json()
     print("incoming:", data)
 
-    required_fields = ["title", "director", "year", "watched", "actors"]
+    required_fields = ["title", "director", "year", "duration_minutes", "watched", "actors", "genres"]
 
     for field in required_fields:
         if field not in data:
             return error_response(
                 "Bad Request",
                 f"Missing required field: {field}", 400)
+
     for field in ["title", "director"]:
         value = data.get(field)
         if not isinstance(value, str) or value.strip() == "":
             return error_response("Bad Request",
                 f"Field '{field}' must be a non-empty string",
              400)
-                
+
     if not isinstance(data.get("year"), int):
         return error_response(
             "Bad Request",
             "Field 'year' must be an integer",
             400)
 
-    if not isinstance(data.get("watched"), bool):
+    if not isinstance(data.get("duration_minutes"), int):
         return error_response(
             "Bad Request",
-            "Field 'watched' must be a boolean", 400)
-    actors = data.get("actors")
+            "Field 'duration_minutes' must be an integer",
+            400)
 
+    mpaa_rating = data.get("mpaa_rating")
+    if mpaa_rating is not None and not isinstance(mpaa_rating, str):
+        return error_response(
+            "Bad Request",
+            "Field 'mpaa_rating' must be a string if provided",
+            400)
+
+    watched_raw = data.get("watched")
+    if isinstance(watched_raw, bool):
+        watched = 1 if watched_raw else 0
+    elif watched_raw in (0, 1):
+        watched = watched_raw
+    else:
+        return error_response(
+            "Bad Request",
+            "Field 'watched' must be a boolean or 0/1", 400)
+
+    actors = data.get("actors")
     if not isinstance(actors, list):
         return error_response(
             "Bad Request",
             "Field 'actors' must be a list of strings",
             400
         )
-
     if not all(isinstance(item, str) for item in actors):
         return error_response(
             "Bad Request",
             "Each actor in 'actors' must be a string",
             400
         )
+
+    genres = data.get("genres")
+    if not isinstance(genres, list):
+        return error_response(
+            "Bad Request",
+            "Field 'genres' must be a list of strings",
+            400
+        )
+    if not all(isinstance(item, str) for item in genres):
+        return error_response(
+            "Bad Request",
+            "Each genre in 'genres' must be a string",
+            400
+        )
+
     try:
         conn = get_db()
         cursor = conn.cursor()
@@ -293,10 +357,20 @@ def create_movie():
 
         cursor.execute(
             """
-                INSERT INTO movies (title, year, director_id)
-                VALUES (?, ?, ?)
-            """, 
-            (data["title"], data["year"], director_id)
+                INSERT INTO movies
+                    (title, year, director_id, mpaa_rating, duration_minutes, watched, actors, genres)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                data["title"],
+                data["year"],
+                director_id,
+                mpaa_rating,
+                data["duration_minutes"],
+                watched,
+                json.dumps(actors),
+                json.dumps(genres),
+            )
         )
         conn.commit()
     except sqlite3.IntegrityError as e:
@@ -309,8 +383,6 @@ def create_movie():
             return error_response("Invalid Request", "SQL-Related Issue", 400)
         else: return error_response("Internal Error", "Unexpected database error", 500)
 
-
-
     new_id = cursor.lastrowid
 
     movie = {
@@ -318,8 +390,11 @@ def create_movie():
         "title": data["title"],
         "year": data["year"],
         "director": data["director"],
-        "watched": data["watched"],
-        "actors": data["actors"]
+        "mpaa_rating": mpaa_rating,
+        "duration_minutes": data["duration_minutes"],
+        "watched": bool(watched),
+        "actors": actors,
+        "genres": genres,
     }
 
     response = make_response(jsonify(movie), 201)
@@ -342,14 +417,14 @@ def create_director():
             properties:
                 name:
                     type: string
-            required: 
+            required:
                 - name
     responses:
         201:
             description: Director created successfully
         400:
             description: Invalid input data
-    
+
     """
     if not request.is_json:
         return error_response("Bad Request", "Not Valid JSON", 400)
@@ -365,7 +440,7 @@ def create_director():
 
     name = data.get("name")
     if not isinstance(name, str) or name.strip() == "":
-        return(
+        return error_response(
             "Bad Request",
             "Field 'name' must be a non-empty string",
             400
@@ -401,30 +476,51 @@ def create_director():
     }
 
     response = make_response(jsonify(director), 201)
-    response.headers["Locations"] = f"/directors/{new_id}"
+    response.headers["Location"] = f"/directors/{new_id}"
     return response
-    
+
+
+# ---------------------------------------------------------------------------
+# PUT route (full replace)
+# ---------------------------------------------------------------------------
+
 @app.put("/movies/<int:id>")
 def update_movie(id):
+    """
+    Fully replace an existing movie
+    ---
+    consumes:
+      - application/json
+    responses:
+      200:
+        description: Movie updated successfully
+      400:
+        description: Invalid input data
+      404:
+        description: Movie not found
+      409:
+        description: Duplicate title/year
+    """
     print(f"PUT /movies/{id} hit!")
 
-    # 1) find the existing movie
-    movie = next((m for m in movies if m["id"] == id), None)
-    if movie is None:
+    db = get_db()
+    existing = db.execute(
+        "SELECT id FROM movies WHERE id = ?", (id,)
+    ).fetchone()
+    if existing is None:
         return error_response(
             "Not Found",
             f"Movie with id {id} not found.",
             404
         )
 
-    # 2) same JSON + validation rules as POST
     if not request.is_json:
         return error_response("Bad Request", "Not valid JSON", 400)
 
     data = request.get_json()
     print("incoming:", data)
 
-    required_fields = ["title", "director", "year", "watched", "actors"]
+    required_fields = ["title", "director", "year", "duration_minutes", "watched", "actors", "genres"]
 
     for field in required_fields:
         if field not in data:
@@ -450,21 +546,40 @@ def update_movie(id):
             400
         )
 
-    if not isinstance(data.get("watched"), bool):
+    if not isinstance(data.get("duration_minutes"), int):
         return error_response(
             "Bad Request",
-            "Field 'watched' must be a boolean",
+            "Field 'duration_minutes' must be an integer",
             400
         )
-    actors = data.get("actors")
 
+    mpaa_rating = data.get("mpaa_rating")
+    if mpaa_rating is not None and not isinstance(mpaa_rating, str):
+        return error_response(
+            "Bad Request",
+            "Field 'mpaa_rating' must be a string if provided",
+            400
+        )
+
+    watched_raw = data.get("watched")
+    if isinstance(watched_raw, bool):
+        watched = 1 if watched_raw else 0
+    elif watched_raw in (0, 1):
+        watched = watched_raw
+    else:
+        return error_response(
+            "Bad Request",
+            "Field 'watched' must be a boolean or 0/1",
+            400
+        )
+
+    actors = data.get("actors")
     if not isinstance(actors, list):
         return error_response(
             "Bad Request",
             "Field 'actors' must be a list of strings",
             400
         )
-
     if not all(isinstance(item, str) for item in actors):
         return error_response(
             "Bad Request",
@@ -472,18 +587,83 @@ def update_movie(id):
             400
         )
 
+    genres = data.get("genres")
+    if not isinstance(genres, list):
+        return error_response(
+            "Bad Request",
+            "Field 'genres' must be a list of strings",
+            400
+        )
+    if not all(isinstance(item, str) for item in genres):
+        return error_response(
+            "Bad Request",
+            "Each genre in 'genres' must be a string",
+            400
+        )
 
-    # 3) mutate the existing movie (keep id)
-    movie["title"] = data["title"]
-    movie["director"] = data["director"]
-    movie["year"] = data["year"]
-    movie["watched"] = data["watched"]
-    movie["actors"] = data["actors"]
+    try:
+        cursor = db.cursor()
 
-    print("movies now:", movies)
+        cursor.execute(
+            "SELECT id FROM directors WHERE name = ?", (data["director"],)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return error_response(
+                "Bad Request",
+                "Unknown director name; create the director first or use a valid director.",
+                400
+            )
+        director_id = row["id"]
 
-    # 4) return the updated resource with 200
+        cursor.execute(
+            """
+                UPDATE movies
+                SET title = ?, year = ?, director_id = ?, mpaa_rating = ?,
+                    duration_minutes = ?, watched = ?, actors = ?, genres = ?
+                WHERE id = ?
+            """,
+            (
+                data["title"],
+                data["year"],
+                director_id,
+                mpaa_rating,
+                data["duration_minutes"],
+                watched,
+                json.dumps(actors),
+                json.dumps(genres),
+                id,
+            )
+        )
+        db.commit()
+    except sqlite3.IntegrityError as e:
+        return error_response(
+            "Duplication Error",
+            "Movie with this title and year already exists.", 409)
+    except sqlite3.OperationalError as e:
+        msg = e.args[0] if e.args else ""
+        if "syntax error" in msg.lower():
+            return error_response("Invalid Request", "SQL-Related Issue", 400)
+        else: return error_response("Internal Error", "Unexpected database error", 500)
+
+    movie = {
+        "id": id,
+        "title": data["title"],
+        "year": data["year"],
+        "director": data["director"],
+        "mpaa_rating": mpaa_rating,
+        "duration_minutes": data["duration_minutes"],
+        "watched": bool(watched),
+        "actors": actors,
+        "genres": genres,
+    }
+
     return jsonify(movie), 200
+
+
+# ---------------------------------------------------------------------------
+# DELETE route
+# ---------------------------------------------------------------------------
 
 @app.delete("/movies/<int:id>")
 def delete_movie(id):
@@ -509,8 +689,6 @@ def delete_movie(id):
                 "Unexpected database error",
                 500
             )
-    finally: 
-        db.close()
 
     if cursor.rowcount == 0:
         return error_response(
@@ -520,30 +698,141 @@ def delete_movie(id):
         )
     else:
         return "", 204
-    
+
+
+# ---------------------------------------------------------------------------
+# PATCH route (partial update)
+# ---------------------------------------------------------------------------
+
 @app.patch("/movies/<int:id>")
 def update_movie_field(id):
+    """
+    Partially update a movie
+    ---
+    consumes:
+      - application/json
+    responses:
+      200:
+        description: Movie updated successfully
+      400:
+        description: Invalid input data
+      404:
+        description: Movie not found
+      409:
+        description: Duplicate title/year
+    """
     if not request.is_json:
         return error_response("Bad Request", "Not valid JSON", 400)
 
     data = request.get_json()
 
-    allowed_fields = ["title", "year", "director_id"] #left in for future refactor
+    allowed_fields = [
+        "title", "year", "director", "mpaa_rating",
+        "duration_minutes", "watched", "actors", "genres",
+    ]
 
     fields = []
     params = []
 
     if "title" in data:
+        value = data.get("title")
+        if not isinstance(value, str) or value.strip() == "":
+            return error_response(
+                "Bad Request",
+                "Field 'title' must be a non-empty string",
+                400
+            )
         fields.append("title = ?")
-        params.append(data["title"])
+        params.append(value)
 
     if "year" in data:
+        if not isinstance(data.get("year"), int):
+            return error_response(
+                "Bad Request",
+                "Field 'year' must be an integer",
+                400
+            )
         fields.append("year = ?")
         params.append(data["year"])
 
-    if "director_id" in data:
+    if "director" in data:
+        value = data.get("director")
+        if not isinstance(value, str) or value.strip() == "":
+            return error_response(
+                "Bad Request",
+                "Field 'director' must be a non-empty string",
+                400
+            )
+        db = get_db()
+        row = db.execute(
+            "SELECT id FROM directors WHERE name = ?", (value,)
+        ).fetchone()
+        if row is None:
+            return error_response(
+                "Bad Request",
+                "Unknown director name; create the director first or use a valid director.",
+                400
+            )
         fields.append("director_id = ?")
-        params.append(data["director_id"])
+        params.append(row["id"])
+
+    if "mpaa_rating" in data:
+        value = data.get("mpaa_rating")
+        if value is not None and not isinstance(value, str):
+            return error_response(
+                "Bad Request",
+                "Field 'mpaa_rating' must be a string if provided",
+                400
+            )
+        fields.append("mpaa_rating = ?")
+        params.append(value)
+
+    if "duration_minutes" in data:
+        if not isinstance(data.get("duration_minutes"), int):
+            return error_response(
+                "Bad Request",
+                "Field 'duration_minutes' must be an integer",
+                400
+            )
+        fields.append("duration_minutes = ?")
+        params.append(data["duration_minutes"])
+
+    if "watched" in data:
+        watched_raw = data.get("watched")
+        if isinstance(watched_raw, bool):
+            watched = 1 if watched_raw else 0
+        elif watched_raw in (0, 1):
+            watched = watched_raw
+        else:
+            return error_response(
+                "Bad Request",
+                "Field 'watched' must be a boolean or 0/1",
+                400
+            )
+        fields.append("watched = ?")
+        params.append(watched)
+
+    if "actors" in data:
+        actors = data.get("actors")
+        if not isinstance(actors, list) or not all(isinstance(item, str) for item in actors):
+            return error_response(
+                "Bad Request",
+                "Field 'actors' must be a list of strings",
+                400
+            )
+        fields.append("actors = ?")
+        params.append(json.dumps(actors))
+
+    if "genres" in data:
+        genres = data.get("genres")
+        if not isinstance(genres, list) or not all(isinstance(item, str) for item in genres):
+            return error_response(
+                "Bad Request",
+                "Field 'genres' must be a list of strings",
+                400
+            )
+        fields.append("genres = ?")
+        params.append(json.dumps(genres))
 
     if not fields:
         return error_response(
@@ -551,13 +840,23 @@ def update_movie_field(id):
             "No Update Fields Provided",
             400
         )
-    db = get_db()
 
+    db = get_db()
     sql = "UPDATE movies SET " + ", ".join(fields) + " WHERE id = ?"
     params.append(id)
 
-    cursor = db.execute(sql, params)
-    db.commit()
+    try:
+        cursor = db.execute(sql, params)
+        db.commit()
+    except sqlite3.IntegrityError as e:
+        return error_response(
+            "Duplication Error",
+            "Movie with this title and year already exists.", 409)
+    except sqlite3.OperationalError as e:
+        msg = e.args[0] if e.args else ""
+        if "syntax error" in msg.lower():
+            return error_response("Invalid Request", "SQL-Related Issue", 400)
+        else: return error_response("Internal Error", "Unexpected database error", 500)
 
     if cursor.rowcount == 0:
         return error_response(
@@ -565,11 +864,18 @@ def update_movie_field(id):
             f"Movie with ID {id} Not Found",
             404
         )
+
     row = db.execute(
         "SELECT * FROM movies WHERE id = ?",
         (id,)
     ).fetchone()
-    return jsonify(dict(row)), 200
+
+    movie = dict(row)
+    movie["actors"] = json.loads(movie["actors"]) if movie["actors"] else []
+    movie["genres"] = json.loads(movie["genres"]) if movie["genres"] else []
+    movie["watched"] = bool(movie["watched"]) if movie["watched"] is not None else None
+
+    return jsonify(movie), 200
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True,)
